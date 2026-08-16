@@ -1,0 +1,32 @@
+services:
+  organic-reveal-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      API_KEYS: ${API_KEYS}
+      DATA_DIR: /app/data
+      MAX_CONCURRENT_RENDERS: ${MAX_CONCURRENT_RENDERS:-2}
+      MAX_QUEUED_JOBS: ${MAX_QUEUED_JOBS:-50}
+      FFMPEG_THREADS: ${FFMPEG_THREADS:-2}
+      OPENCV_THREADS: ${OPENCV_THREADS:-1}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-20}
+      MAX_PIXELS: ${MAX_PIXELS:-20000000}
+      JOB_TTL_HOURS: ${JOB_TTL_HOURS:-24}
+      PURGE_INTERVAL_MINUTES: ${PURGE_INTERVAL_MINUTES:-15}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    expose:
+      - "8000"
+    volumes:
+      - reveal-data:/app/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=3)"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    restart: unless-stopped
+    stop_grace_period: 45s
+
+volumes:
+  reveal-data:
