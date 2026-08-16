@@ -15,8 +15,8 @@ services:
       JOB_TTL_HOURS: ${JOB_TTL_HOURS:-24}
       PURGE_INTERVAL_MINUTES: ${PURGE_INTERVAL_MINUTES:-15}
       LOG_LEVEL: ${LOG_LEVEL:-INFO}
-    expose:
-      - "8000"
+    ports:
+        - "8064:8000"
     volumes:
       - reveal-data:/app/data
     healthcheck:
