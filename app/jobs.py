@@ -122,7 +122,7 @@ class JobManager:
 
         directory = self.storage.job_dir(job_id)
         try:
-            width, height, frames = render_video(
+            result = render_video(
                 directory / "input.png",
                 directory / "output.mp4",
                 record.options,
@@ -133,9 +133,10 @@ class JobManager:
                 record = self.records[job_id]
                 record.status = JobStatus.completed
                 record.progress = 1.0
-                record.width = width
-                record.height = height
-                record.frames = frames
+                record.width = result.width
+                record.height = result.height
+                record.frames = result.frames
+                record.regions_detected = result.regions_detected
                 record.finished_at = now.isoformat()
                 record.expires_at = (now + timedelta(hours=self.settings.job_ttl_hours)).isoformat()
                 self.storage.save(record)

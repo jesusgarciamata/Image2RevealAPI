@@ -20,7 +20,9 @@ from .models import (
     HealthResponse,
     JobRecord,
     JobStatus,
+    RegionOrder,
     RenderOptions,
+    SegmentationMode,
 )
 from .storage import JobStorage
 
@@ -43,7 +45,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Organic Reveal API",
-    version="0.1.0",
+    version="0.3.0",
     description="Convierte una imagen en un video de revelado progresivo por detalles coloreados y pincel orgánico.",
     lifespan=lifespan,
 )
@@ -62,6 +64,22 @@ def _parse_direction(value: str) -> Direction:
     except ValueError as exc:
         allowed = ", ".join(item.value for item in Direction)
         raise HTTPException(status_code=422, detail=f"direction debe ser: {allowed}") from exc
+
+
+def _parse_segmentation_mode(value: str) -> SegmentationMode:
+    try:
+        return SegmentationMode(value)
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in SegmentationMode)
+        raise HTTPException(status_code=422, detail=f"segmentation_mode debe ser: {allowed}") from exc
+
+
+def _parse_region_order(value: str) -> RegionOrder:
+    try:
+        return RegionOrder(value)
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in RegionOrder)
+        raise HTTPException(status_code=422, detail=f"region_order debe ser: {allowed}") from exc
 
 
 async def _read_and_normalize(upload: UploadFile) -> tuple[bytes, int, int]:
@@ -117,7 +135,12 @@ async def create_render(
     final_hold: float = Form(0.6, ge=0.0, le=5.0),
     brush_radius: float = Form(0.12, ge=0.03, le=0.30),
     brush_feather: float = Form(0.16, ge=0.01, le=0.60),
-    direction: str = Form("right-to-left"),
+    fill_brushes: int = Form(3, ge=1, le=5),
+    direction: str = Form("reading-order"),
+    segmentation_mode: str = Form("auto"),
+    region_order: str = Form("saliency"),
+    max_regions: int = Form(12, ge=2, le=32),
+    min_region_area: float = Form(0.002, ge=0.0002, le=0.05),
     background: str = Form("#f1efe9", pattern=r"^#[0-9a-fA-F]{6}$"),
     output_width: int = Form(0, ge=0, le=3840),
     seed: int = Form(3842, ge=0, le=2_147_483_647),
@@ -133,7 +156,12 @@ async def create_render(
         final_hold=final_hold,
         brush_radius=brush_radius,
         brush_feather=brush_feather,
+        fill_brushes=fill_brushes,
         direction=_parse_direction(direction),
+        segmentation_mode=_parse_segmentation_mode(segmentation_mode),
+        region_order=_parse_region_order(region_order),
+        max_regions=max_regions,
+        min_region_area=min_region_area,
         background=background,
         output_width=output_width,
         seed=seed,
@@ -192,6 +220,26 @@ def download_video(job_id: str) -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=410, detail="El video ya no está disponible")
     return FileResponse(path, media_type="video/mp4", filename=f"organic-reveal-{job_id}.mp4")
+
+
+@app.get(
+    "/v1/renders/{job_id}/regions",
+    dependencies=[Depends(require_api_key)],
+    response_class=FileResponse,
+)
+def download_region_preview(job_id: str) -> FileResponse:
+    try:
+        record = manager.get(job_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail="Render no encontrado") from exc
+    if record is None:
+        raise HTTPException(status_code=404, detail="Render no encontrado")
+    if record.status != JobStatus.completed:
+        raise HTTPException(status_code=409, detail=f"El render está {record.status.value}")
+    path = storage.job_dir(job_id) / "regions.png"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="Este render no utilizó segmentación automática")
+    return FileResponse(path, media_type="image/png", filename=f"regions-{job_id}.png")
 
 
 @app.delete(

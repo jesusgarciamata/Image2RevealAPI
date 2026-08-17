@@ -20,6 +20,11 @@ MAX_CONCURRENT_RENDERS=2
 MAX_QUEUED_JOBS=50
 FFMPEG_THREADS=2
 OPENCV_THREADS=1
+SAM2_DEVICE=cpu
+SAM2_CPU_THREADS=4
+SAM2_POINTS_PER_SIDE=16
+SAM2_POINTS_PER_BATCH=16
+SAM2_ANALYSIS_SIZE=768
 MAX_UPLOAD_MB=20
 MAX_PIXELS=20000000
 JOB_TTL_HOURS=24
@@ -56,7 +61,9 @@ La purga se controla con:
 
 ## 5. Recursos
 
-Cada render concurrente usa CPU y aproximadamente varios buffers RGB del tamaño de la imagen. Empieza con `MAX_CONCURRENT_RENDERS=2`, `FFMPEG_THREADS=2` y `OPENCV_THREADS=1`. Si la memoria o CPU permanecen holgadas durante varios trabajos 1080p, incrementa la concurrencia a `3` o `4` y vuelve a observar el servidor.
+Cada render concurrente usa CPU y aproximadamente varios buffers RGB del tamaño de la imagen. La versión 0.3 mantiene además SAM 2 cargado en memoria. Empieza con `MAX_CONCURRENT_RENDERS=1` o `2`, `FFMPEG_THREADS=2`, `OPENCV_THREADS=1` y `SAM2_CPU_THREADS=4`. Incrementa la concurrencia solamente después de observar memoria y CPU con imágenes reales.
+
+La segmentación se serializa: nunca habrá dos inferencias SAM 2 simultáneas dentro del contenedor. Los renders que ya terminaron de segmentar sí pueden codificarse concurrentemente.
 
 No aumentes el número de workers de Uvicorn: la cola vive dentro del proceso. La concurrencia de render se controla exclusivamente con `MAX_CONCURRENT_RENDERS`.
 
@@ -80,3 +87,16 @@ Debe devolver algo similar a:
 ```
 
 Después abre `/docs` para ejecutar el primer render desde Swagger UI.
+
+## Actualizar a 0.3.0
+
+1. Sustituye el código del repositorio por la versión 0.3.0 y realiza `push`.
+2. En Coolify pulsa **Redeploy** si el webhook no lo hace automáticamente.
+3. No borres el volumen `reveal-data`; no requiere migración.
+4. Confirma que `/docs` muestre `segmentation_mode`, `region_order`, `max_regions` y `min_region_area`.
+
+La primera compilación será considerablemente mayor que en 0.2 porque descarga PyTorch CPU, el código de SAM 2 fijado a una revisión concreta y un checkpoint verificado de aproximadamente 156 MB. El servidor de build necesita acceso saliente a `download.pytorch.org`, `github.com` y `huggingface.co`.
+
+El primer render después de iniciar el contenedor carga el modelo y puede tardar más. Las siguientes solicitudes reutilizan la misma instancia.
+
+Los clientes que necesiten el comportamiento anterior pueden enviar `segmentation_mode=none`. No hay migración del volumen ni cambio en los endpoints existentes.

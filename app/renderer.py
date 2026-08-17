@@ -4,16 +4,26 @@ import math
 import os
 import subprocess
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 import cv2
 import numpy as np
 from PIL import Image
 
-from .models import Direction, RenderOptions
+from .models import Direction, RenderOptions, SegmentationMode
+from .segmentation import RegionPlan, save_region_preview, segment_image
 
 
 ProgressCallback = Callable[[float], None]
+
+
+@dataclass(frozen=True)
+class RenderResult:
+    width: int
+    height: int
+    frames: int
+    regions_detected: int
 
 
 def _runtime_threads(name: str, default: int) -> int:
@@ -125,7 +135,9 @@ def build_detail_arrival(
     yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
     x = xx / max(width - 1, 1)
     y = yy / max(height - 1, 1)
-    if direction == Direction.right_to_left:
+    if direction == Direction.reading_order:
+        base = 0.58 * x + 0.42 * y
+    elif direction == Direction.right_to_left:
         base = 1.0 - x
     elif direction == Direction.left_to_right:
         base = x
@@ -135,6 +147,14 @@ def build_detail_arrival(
         base = 1.0 - y
     elif direction == Direction.center_out:
         base = np.sqrt(((x - 0.5) / 0.71) ** 2 + ((y - 0.5) / 0.71) ** 2)
+    elif direction == Direction.random_origins:
+        origin_count = int(rng.integers(2, 5))
+        base = np.full((height, width), np.inf, dtype=np.float32)
+        for _ in range(origin_count):
+            ox = float(rng.uniform(0.08, 0.92))
+            oy = float(rng.uniform(0.08, 0.92))
+            distance = np.sqrt(((x - ox) / 1.0) ** 2 + ((y - oy) / 1.0) ** 2)
+            base = np.minimum(base, distance)
     else:
         base = 0.56 * (1.0 - x) + 0.22 * y + 0.22 * np.sin(y * math.pi * 3.0) ** 2
 
@@ -145,72 +165,98 @@ def build_detail_arrival(
     return arrival.astype(np.float32)
 
 
-def _ordered_brush_points(
+def _sample_line(
+    start: tuple[float, float],
+    end: tuple[float, float],
+    step: float,
+) -> list[tuple[float, float]]:
+    distance = math.hypot(end[0] - start[0], end[1] - start[1])
+    count = max(1, math.ceil(distance / max(step, 1.0)))
+    return [
+        (
+            start[0] + (end[0] - start[0]) * index / count,
+            start[1] + (end[1] - start[1]) * index / count,
+        )
+        for index in range(count)
+    ]
+
+
+def build_continuous_brush_path(
     height: int,
     width: int,
     radius: float,
     direction: Direction,
     rng: np.random.Generator,
-) -> list[tuple[float, float, float]]:
-    spacing = radius * 1.08
-    xs = np.arange(-radius * 0.2, width + radius * 0.2 + spacing, spacing)
-    ys = np.arange(-radius * 0.2, height + radius * 0.2 + spacing, spacing)
-    points: list[tuple[float, float, float]] = []
-    for row, y in enumerate(ys):
-        row_xs = xs if row % 2 == 0 else xs[::-1]
-        for x in row_xs:
-            jitter_x = rng.uniform(-0.16, 0.16) * radius
-            jitter_y = rng.uniform(-0.16, 0.16) * radius
-            scale = rng.uniform(0.88, 1.14)
-            points.append((float(x + jitter_x), float(y + jitter_y), float(radius * scale)))
+) -> list[tuple[float, float]]:
+    """Build one dense, continuous serpentine path with a gently hand-driven wobble."""
+    lane_spacing = radius * 1.28
+    lane_count = max(2, math.ceil(height / lane_spacing))
+    margin_y = min(radius * 0.16, height * 0.04)
+    lanes = np.linspace(margin_y, height - 1 - margin_y, lane_count)
+    if direction == Direction.bottom_to_top:
+        lanes = lanes[::-1]
 
-    def priority(point: tuple[float, float, float]) -> float:
-        x, y, _ = point
-        nx = x / max(width, 1)
-        ny = y / max(height, 1)
-        if direction == Direction.right_to_left:
-            return 1.0 - nx + 0.10 * math.sin(ny * math.pi * 4.0)
-        if direction == Direction.left_to_right:
-            return nx + 0.10 * math.sin(ny * math.pi * 4.0)
-        if direction == Direction.top_to_bottom:
-            return ny + 0.10 * math.sin(nx * math.pi * 4.0)
-        if direction == Direction.bottom_to_top:
-            return 1.0 - ny + 0.10 * math.sin(nx * math.pi * 4.0)
-        if direction == Direction.center_out:
-            return math.hypot(nx - 0.5, ny - 0.5)
-        return 0.58 * (1.0 - nx) + 0.20 * ny + 0.22 * math.sin((nx + ny) * math.pi * 2.0)
+    start_on_left = direction != Direction.right_to_left
+    step = max(2.0, radius * 0.24)
+    margin_x = min(radius * 0.12, width * 0.03)
+    path: list[tuple[float, float]] = []
+    phase = float(rng.uniform(0.0, math.tau))
 
-    decorated = [(priority(point) + rng.uniform(-0.045, 0.045), point) for point in points]
-    decorated.sort(key=lambda item: item[0])
-    return [point for _, point in decorated]
+    for lane_index, lane_y in enumerate(lanes):
+        left_to_right = (lane_index % 2 == 0) == start_on_left
+        start_x, end_x = (
+            (margin_x, width - 1 - margin_x)
+            if left_to_right
+            else (width - 1 - margin_x, margin_x)
+        )
+        segment = _sample_line((start_x, float(lane_y)), (end_x, float(lane_y)), step)
+        for point_index, (x, y) in enumerate(segment):
+            global_index = len(path) + point_index
+            wobble = math.sin(global_index * 0.17 + phase) * radius * 0.13
+            slow_wobble = math.sin(global_index * 0.043 + phase * 0.7) * radius * 0.11
+            path.append((x, float(np.clip(y + wobble + slow_wobble, 0, height - 1))))
+
+        if lane_index + 1 < len(lanes):
+            connector_x = end_x
+            connector = _sample_line(
+                (connector_x, path[-1][1]),
+                (connector_x, float(lanes[lane_index + 1])),
+                step,
+            )
+            path.extend(connector)
+
+    if direction == Direction.center_out:
+        middle = len(path) // 2
+        path = path[middle:] + path[-2::-1]
+    elif direction in {Direction.organic, Direction.random_origins} and rng.random() < 0.5:
+        path.reverse()
+    return path
 
 
 def build_fill_arrival(
     height: int,
     width: int,
     radius_ratio: float,
+    brush_count: int,
     direction: Direction,
     rng: np.random.Generator,
 ) -> np.ndarray:
     radius = max(8.0, min(height, width) * radius_ratio)
-    points = _ordered_brush_points(height, width, radius, direction, rng)
+    points = build_continuous_brush_path(height, width, radius, direction, rng)
     arrival = np.full((height, width), np.inf, dtype=np.float32)
-    count = max(len(points) - 1, 1)
+    boundaries = np.linspace(0, len(points), brush_count + 1, dtype=int)
 
-    for index, (cx, cy, point_radius) in enumerate(points):
-        x0 = max(0, int(cx - point_radius))
-        x1 = min(width, int(cx + point_radius) + 1)
-        y0 = max(0, int(cy - point_radius))
-        y1 = min(height, int(cy + point_radius) + 1)
-        if x0 >= x1 or y0 >= y1:
-            continue
-        yy, xx = np.mgrid[y0:y1, x0:x1]
-        distance = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / point_radius
-        inside = distance <= 1.0
-        stamp_time = index / count
-        candidate = stamp_time + distance.astype(np.float32) * (0.035 / max(radius_ratio, 0.03))
-        region = arrival[y0:y1, x0:x1]
-        np.minimum(region, np.where(inside, candidate, np.inf), out=region)
+    for brush_index in range(brush_count):
+        start = int(boundaries[brush_index])
+        end = int(boundaries[brush_index + 1])
+        brush_points = points[start:end]
+        local_count = max(len(brush_points) - 1, 1)
+        brush_phase = float(rng.uniform(0.0, math.tau))
+        for local_index, (cx, cy) in enumerate(brush_points):
+            scale = 1.0 + 0.08 * math.sin(local_index * 0.09 + brush_phase)
+            point_radius = radius * scale
+            stamp_time = local_index / local_count
+            _stamp_arrival(arrival, cx, cy, point_radius, stamp_time, radius_ratio)
 
     finite = np.isfinite(arrival)
     if not finite.all():
@@ -220,12 +266,115 @@ def build_fill_arrival(
     return arrival
 
 
+def _region_local_arrival(
+    mask: np.ndarray,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    height, width = mask.shape
+    ys, xs = np.nonzero(mask)
+    arrival = np.ones((height, width), dtype=np.float32)
+    if not len(xs):
+        return arrival
+
+    sample_step = max(1, len(xs) // 80_000)
+    points = np.column_stack((xs[::sample_step], ys[::sample_step])).astype(np.float32)
+    centered = points - points.mean(axis=0, keepdims=True)
+    if len(points) >= 3:
+        covariance = np.cov(centered, rowvar=False)
+        values, vectors = np.linalg.eigh(covariance)
+        axis = vectors[:, int(np.argmax(values))].astype(np.float32)
+    else:
+        axis = np.array([1.0, 0.0], dtype=np.float32)
+    reading_vector = np.array([0.82, 0.38], dtype=np.float32)
+    if float(np.dot(axis, reading_vector)) < 0:
+        axis *= -1.0
+
+    yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+    projection = xx * axis[0] + yy * axis[1]
+    values_inside = projection[mask]
+    projection = (projection - float(values_inside.min())) / max(
+        float(values_inside.max() - values_inside.min()), 1e-6
+    )
+
+    noise = _low_frequency_noise(height, width, rng)
+    distance = cv2.distanceTransform(mask.astype(np.uint8), cv2.DIST_L2, 5)
+    distance /= max(float(distance.max()), 1e-6)
+    local = 0.70 * projection + 0.19 * noise + 0.11 * (1.0 - distance)
+    local_values = local[mask]
+    local = (local - float(local_values.min())) / max(
+        float(local_values.max() - local_values.min()), 1e-6
+    )
+    arrival[mask] = np.clip(local[mask], 0.0, 1.0)
+    return arrival
+
+
+def build_segmented_fill_arrival(
+    plan: RegionPlan,
+    radius_ratio: float,
+    brush_count: int,
+    direction: Direction,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    height, width = plan.residual.shape
+    arrival = np.ones((height, width), dtype=np.float32)
+    weights = [max(0.65, math.sqrt(region.area / max(height * width, 1)) * 3.0) for region in plan.regions]
+    residual_area = int(np.count_nonzero(plan.residual))
+    residual_weight = max(0.9, min(1.8, math.sqrt(residual_area / max(height * width, 1)) * 2.0))
+    total_weight = sum(weights) + residual_weight
+    cursor = 0.0
+
+    for region, weight in zip(plan.regions, weights):
+        span = weight / max(total_weight, 1e-6)
+        local = _region_local_arrival(region.mask, rng)
+        arrival[region.mask] = cursor + local[region.mask] * span
+        cursor += span
+
+    if residual_area:
+        residual_local = build_fill_arrival(
+            height,
+            width,
+            radius_ratio,
+            brush_count,
+            direction,
+            rng,
+        )
+        residual_span = max(1.0 - cursor, 1e-6)
+        arrival[plan.residual] = cursor + residual_local[plan.residual] * residual_span
+
+    arrival -= float(arrival.min())
+    arrival /= max(float(arrival.max()), 1e-6)
+    return arrival
+
+
+def _stamp_arrival(
+    arrival: np.ndarray,
+    cx: float,
+    cy: float,
+    point_radius: float,
+    stamp_time: float,
+    radius_ratio: float,
+) -> None:
+    height, width = arrival.shape
+    x0 = max(0, int(cx - point_radius))
+    x1 = min(width, int(cx + point_radius) + 1)
+    y0 = max(0, int(cy - point_radius))
+    y1 = min(height, int(cy + point_radius) + 1)
+    if x0 >= x1 or y0 >= y1:
+        return
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    distance = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / point_radius
+    inside = distance <= 1.0
+    candidate = stamp_time + distance.astype(np.float32) * (0.018 / max(radius_ratio, 0.03))
+    region = arrival[y0:y1, x0:x1]
+    np.minimum(region, np.where(inside, candidate, np.inf), out=region)
+
+
 def render_video(
     input_path: Path,
     output_path: Path,
     options: RenderOptions,
     progress: ProgressCallback,
-) -> tuple[int, int, int]:
+) -> RenderResult:
     with Image.open(input_path) as image:
         image = image.convert("RGB")
         rgb = np.asarray(image)
@@ -241,9 +390,34 @@ def render_video(
     background = _paper_background(height, width, options.background)
     detail_alpha = build_detail_mask(rgb)
     detail_arrival = build_detail_arrival(height, width, options.direction, rng)
-    fill_arrival = build_fill_arrival(
-        height, width, options.brush_radius, options.direction, rng
-    )
+    regions_detected = 0
+    if options.segmentation_mode == SegmentationMode.auto:
+        plan = segment_image(
+            rgb,
+            max_regions=options.max_regions,
+            min_area_ratio=options.min_region_area,
+            order=options.region_order,
+            seed=options.seed,
+        )
+        regions_detected = len(plan.regions)
+        save_region_preview(rgb, plan, output_path.parent / "regions.png")
+        fill_arrival = build_segmented_fill_arrival(
+            plan,
+            options.brush_radius,
+            options.fill_brushes,
+            options.direction,
+            rng,
+        )
+        progress(0.05)
+    else:
+        fill_arrival = build_fill_arrival(
+            height,
+            width,
+            options.brush_radius,
+            options.fill_brushes,
+            options.direction,
+            rng,
+        )
 
     temporary = output_path.with_suffix(".tmp.mp4")
     command = [
@@ -316,7 +490,7 @@ def render_video(
                     frame = original
 
             process.stdin.write(np.clip(frame, 0, 255).astype(np.uint8).tobytes())
-            progress((frame_index + 1) / total_frames)
+            progress(0.05 + 0.95 * (frame_index + 1) / total_frames)
     except (BrokenPipeError, OSError) as exc:
         stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
         raise RuntimeError(f"FFmpeg interrumpió el render: {stderr[-1000:]}") from exc
@@ -330,4 +504,9 @@ def render_video(
         stderr = stderr_bytes.decode("utf-8", errors="replace")
         raise RuntimeError(f"FFmpeg terminó con código {return_code}: {stderr[-1000:]}")
     os.replace(temporary, output_path)
-    return width, height, total_frames
+    return RenderResult(
+        width=width,
+        height=height,
+        frames=total_frames,
+        regions_detected=regions_detected,
+    )

@@ -8,6 +8,7 @@ import app.jobs as jobs_module
 from app.config import Settings
 from app.jobs import JobManager
 from app.models import JobRecord, JobStatus, RenderOptions, utc_now_iso
+from app.renderer import RenderResult
 from app.storage import JobStorage
 
 
@@ -39,7 +40,7 @@ def test_configured_concurrency_is_respected(tmp_path, monkeypatch) -> None:
         progress(1.0)
         with state_lock:
             active -= 1
-        return 100, 60, 24
+        return RenderResult(width=100, height=60, frames=24, regions_detected=3)
 
     monkeypatch.setattr(jobs_module, "render_video", fake_render)
     manager.start()
