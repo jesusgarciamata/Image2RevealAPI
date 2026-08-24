@@ -45,7 +45,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Organic Reveal API",
-    version="0.3.0",
+    version="0.3.1",
     description="Convierte una imagen en un video de revelado progresivo por detalles coloreados y pincel orgánico.",
     lifespan=lifespan,
 )
@@ -131,6 +131,18 @@ async def create_render(
     duration: float = Form(10.0, ge=2.0, le=60.0),
     fps: int = Form(30, ge=12, le=60),
     detail_ratio: float = Form(0.45, ge=0.15, le=0.8),
+    detail_chroma: float = Form(
+        1.0,
+        ge=0.0,
+        le=1.0,
+        description="Saturación de la capa de detalle: 0 monocromo, 1 color original",
+    ),
+    detail_selectivity: float = Form(
+        0.5,
+        ge=0.0,
+        le=1.0,
+        description="Selectividad de contornos: valores altos descartan textura débil",
+    ),
     fill_overlap: float = Form(0.08, ge=0.0, le=0.25),
     final_hold: float = Form(0.6, ge=0.0, le=5.0),
     brush_radius: float = Form(0.12, ge=0.03, le=0.30),
@@ -152,6 +164,8 @@ async def create_render(
         duration=duration,
         fps=fps,
         detail_ratio=detail_ratio,
+        detail_chroma=detail_chroma,
+        detail_selectivity=detail_selectivity,
         fill_overlap=fill_overlap,
         final_hold=final_hold,
         brush_radius=brush_radius,

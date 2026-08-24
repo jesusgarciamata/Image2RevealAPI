@@ -1,5 +1,11 @@
 # Historial de cambios
 
+## 0.3.1
+
+- Nuevo parámetro `detail_chroma` para desaturar únicamente la capa de detalle sin alterar el relleno ni la imagen final.
+- Nuevo parámetro `detail_selectivity` para conservar solo los contornos y texturas de mayor intensidad.
+- Los valores predeterminados mantienen el aspecto de la versión 0.3.0 para no cambiar renders existentes.
+
 ## 0.3.0
 
 - Segmentación automática distinta para cada imagen mediante SAM 2.1 Hiera Tiny.

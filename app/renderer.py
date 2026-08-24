@@ -76,7 +76,7 @@ def _paper_background(height: int, width: int, color: str) -> np.ndarray:
     return np.clip(base * (1.0 - 0.055 * vignette), 0, 255)
 
 
-def build_detail_mask(rgb: np.ndarray) -> np.ndarray:
+def build_detail_mask(rgb: np.ndarray, selectivity: float = 0.5) -> np.ndarray:
     """Create a soft mask for colored contours, hatching and high-frequency detail."""
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB).astype(np.float32)
@@ -111,9 +111,22 @@ def build_detail_mask(rgb: np.ndarray) -> np.ndarray:
     feature = np.maximum(feature, 0.72 * local_variance)
     feature = np.maximum(feature, 0.78 * fine)
     feature = np.maximum(feature, 0.42 * darkness_support)
-    mask = _smoothstep(0.10, 0.46, feature)
+    # A selectivity of 0.5 reproduces the original 0.3.0 thresholds exactly.
+    # Higher values keep only stronger contours; lower values retain more texture.
+    lower_threshold = -0.10 + 0.40 * selectivity
+    upper_threshold = 0.26 + 0.40 * selectivity
+    mask = _smoothstep(lower_threshold, upper_threshold, feature)
     mask = cv2.GaussianBlur(mask.astype(np.float32), (0, 0), 0.65)
     return np.clip(mask, 0.0, 1.0)
+
+
+def build_detail_source(rgb: np.ndarray, chroma: float = 1.0) -> np.ndarray:
+    """Return the source used by the detail phase with controllable chroma."""
+    original = rgb.astype(np.float32)
+    if chroma >= 1.0:
+        return original
+    grayscale = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)[..., None]
+    return grayscale + (original - grayscale) * chroma
 
 
 def _low_frequency_noise(height: int, width: int, rng: np.random.Generator) -> np.ndarray:
@@ -388,7 +401,8 @@ def render_video(
     rng = np.random.default_rng(options.seed)
     original = rgb.astype(np.float32)
     background = _paper_background(height, width, options.background)
-    detail_alpha = build_detail_mask(rgb)
+    detail_alpha = build_detail_mask(rgb, options.detail_selectivity)
+    detail_source = build_detail_source(rgb, options.detail_chroma)
     detail_arrival = build_detail_arrival(height, width, options.direction, rng)
     regions_detected = 0
     if options.segmentation_mode == SegmentationMode.auto:
@@ -472,7 +486,7 @@ def render_video(
                     detail_progress - detail_arrival,
                 )
                 detail = (detail_alpha * detail_reveal)[..., None]
-                frame = background * (1.0 - detail) + original * detail
+                frame = background * (1.0 - detail) + detail_source * detail
 
                 if timeline > fill_start:
                     fill_progress = float(

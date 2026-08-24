@@ -47,6 +47,18 @@ class RenderOptions(BaseModel):
     duration: float = Field(default=10.0, ge=2.0, le=60.0)
     fps: int = Field(default=30, ge=12, le=60)
     detail_ratio: float = Field(default=0.45, ge=0.15, le=0.8)
+    detail_chroma: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Saturación de la capa de detalle: 0 monocromo, 1 color original",
+    )
+    detail_selectivity: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Selectividad de contornos: valores altos descartan textura débil",
+    )
     fill_overlap: float = Field(default=0.08, ge=0.0, le=0.25)
     final_hold: float = Field(default=0.6, ge=0.0, le=5.0)
     brush_radius: float = Field(default=0.12, ge=0.03, le=0.30)

@@ -46,6 +46,8 @@ curl -X POST http://localhost:8000/v1/renders \
   -F 'duration=10' \
   -F 'fps=30' \
   -F 'detail_ratio=0.45' \
+  -F 'detail_chroma=1.0' \
+  -F 'detail_selectivity=0.5' \
   -F 'brush_radius=0.12' \
   -F 'fill_brushes=3' \
   -F 'direction=reading-order' \
@@ -92,6 +94,8 @@ curl -X DELETE -H 'X-API-Key: dev-secret-change-me' \
 | `duration` | `10` | Duración total en segundos |
 | `fps` | `30` | Fotogramas por segundo |
 | `detail_ratio` | `0.45` | Punto de la línea de tiempo donde termina la fase de detalles |
+| `detail_chroma` | `1.0` | Color de la capa de detalle: `0` monocromo, `1` color original |
+| `detail_selectivity` | `0.5` | Fuerza mínima del detalle: valores altos conservan menos textura y contornos más definidos |
 | `fill_overlap` | `0.08` | Superposición temporal entre detalles y relleno |
 | `final_hold` | `0.6` | Tiempo que permanece la imagen terminada |
 | `brush_radius` | `0.12` | Radio respecto al lado menor de la imagen |
@@ -109,6 +113,8 @@ curl -X DELETE -H 'X-API-Key: dev-secret-change-me' \
 Direcciones permitidas: `reading-order`, `right-to-left`, `left-to-right`, `top-to-bottom`, `bottom-to-top`, `center-out`, `organic` y `random-origins`.
 
 `reading-order` comienza en la zona superior izquierda y combina avance de izquierda a derecha con descenso gradual. `random-origins` inicia la capa de detalles simultáneamente desde varios puntos determinados por `seed`.
+
+`detail_chroma` afecta únicamente la primera fase. El relleno y la imagen final siempre recuperan el color original. `detail_selectivity=0.5` conserva el comportamiento de la versión 0.3.0; valores próximos a `0.7` eliminan más manchas y textura débil. Para separar completamente las dos fases usa `fill_overlap=0`.
 
 Órdenes de región: `saliency`, `reading-order`, `center-first`, `large-first`, `small-first` y `random`. La segmentación no depende de categorías predefinidas: analiza cada imagen y produce máscaras nuevas. Las máscaras se limpian, se desduplican y se convierten en una partición sin solapamientos. Los píxeles no asignados forman una región residual que siempre se revela al final.
 
