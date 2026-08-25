@@ -403,30 +403,19 @@ def build_random_residual_arrival(
                 radius * scale,
                 local_index / local_count,
                 radius_ratio,
-                radial_delay=0.004,
+                radial_delay=0.0,
             )
 
-    finite = np.isfinite(arrival)
-    finite_residual = finite & residual
+    finite_residual = np.isfinite(arrival) & residual
     if np.any(finite_residual):
         lower = float(arrival[finite_residual].min())
         upper = float(arrival[finite_residual].max())
-        arrival[finite] = np.clip(
-            (arrival[finite] - lower) / max(upper - lower, 1e-6),
+        arrival[finite_residual] = np.clip(
+            (arrival[finite_residual] - lower) / max(upper - lower, 1e-6),
             0.0,
             1.0,
         )
-    arrival[~finite] = 1.0
-    arrival = cv2.GaussianBlur(
-        arrival,
-        (0, 0),
-        sigmaX=max(1.0, radius * 0.45),
-        sigmaY=max(1.0, radius * 0.45),
-    )
-    residual_values = arrival[residual]
-    arrival[residual] = (residual_values - float(residual_values.min())) / max(
-        float(residual_values.max() - residual_values.min()), 1e-6
-    )
+    arrival[residual & ~finite_residual] = 1.0
     arrival[~residual] = 1.0
     return arrival
 

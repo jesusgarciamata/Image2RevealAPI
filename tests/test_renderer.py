@@ -144,7 +144,26 @@ def test_random_residual_arrival_covers_only_residual() -> None:
     assert 0.0 <= float(arrival[residual].min())
     assert float(arrival[residual].max()) <= 1.0
     assert np.all(arrival[~residual] == 1.0)
-    horizontal = np.abs(np.diff(arrival, axis=1))[residual[:, :-1] & residual[:, 1:]]
-    vertical = np.abs(np.diff(arrival, axis=0))[residual[:-1] & residual[1:]]
-    neighbor_deltas = np.concatenate((horizontal, vertical))
-    assert float(np.percentile(neighbor_deltas, 99)) < 0.08
+
+
+def test_random_residual_arrival_starts_as_one_solid_brush_stamp() -> None:
+    residual = np.ones((120, 180), dtype=bool)
+    radius_ratio = 0.10
+    radius = min(residual.shape) * radius_ratio
+    path = build_random_residual_brush_path(
+        residual,
+        radius,
+        np.random.default_rng(23),
+    )
+    arrival = build_random_residual_arrival(
+        residual,
+        radius_ratio=radius_ratio,
+        brush_count=1,
+        rng=np.random.default_rng(23),
+    )
+
+    start_x, start_y = path[0]
+    sample_x = int(np.clip(round(start_x + radius * 0.4), 0, residual.shape[1] - 1))
+    sample_y = int(np.clip(round(start_y), 0, residual.shape[0] - 1))
+    assert arrival[round(start_y), round(start_x)] == 0.0
+    assert arrival[sample_y, sample_x] == 0.0
