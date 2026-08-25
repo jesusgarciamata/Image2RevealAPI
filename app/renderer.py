@@ -11,7 +11,7 @@ import cv2
 import numpy as np
 from PIL import Image
 
-from .models import Direction, RenderOptions, SegmentationMode
+from .models import DetailMode, Direction, RenderOptions, SegmentationMode
 from .segmentation import RegionPlan, save_region_preview, segment_image
 
 
@@ -127,6 +127,11 @@ def build_detail_source(rgb: np.ndarray, chroma: float = 1.0) -> np.ndarray:
         return original
     grayscale = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY).astype(np.float32)[..., None]
     return grayscale + (original - grayscale) * chroma
+
+
+def harden_detail_mask(mask: np.ndarray) -> np.ndarray:
+    """Turn the soft feature mask into defined ink while preserving antialiasing."""
+    return _smoothstep(0.18, 0.72, mask).astype(np.float32)
 
 
 def _low_frequency_noise(height: int, width: int, rng: np.random.Generator) -> np.ndarray:
@@ -403,8 +408,9 @@ def render_video(
     background = _paper_background(height, width, options.background)
     detail_alpha = build_detail_mask(rgb, options.detail_selectivity)
     detail_source = build_detail_source(rgb, options.detail_chroma)
-    detail_arrival = build_detail_arrival(height, width, options.direction, rng)
+    legacy_detail_arrival = build_detail_arrival(height, width, options.direction, rng)
     regions_detected = 0
+    plan: RegionPlan | None = None
     if options.segmentation_mode == SegmentationMode.auto:
         plan = segment_image(
             rgb,
@@ -415,6 +421,34 @@ def render_video(
         )
         regions_detected = len(plan.regions)
         save_region_preview(rgb, plan, output_path.parent / "regions.png")
+
+    if options.detail_mode == DetailMode.regions:
+        detail_alpha = harden_detail_mask(detail_alpha)
+        detail_rng = np.random.default_rng(options.seed ^ 0x05DE7A11)
+        if plan is not None:
+            detail_arrival = build_segmented_fill_arrival(
+                plan,
+                options.brush_radius,
+                options.fill_brushes,
+                options.direction,
+                detail_rng,
+            )
+        else:
+            detail_arrival = build_fill_arrival(
+                height,
+                width,
+                options.brush_radius,
+                options.fill_brushes,
+                options.direction,
+                detail_rng,
+            )
+        del legacy_detail_arrival
+        detail_softness = options.detail_feather
+    else:
+        detail_arrival = legacy_detail_arrival
+        detail_softness = 0.035
+
+    if plan is not None:
         fill_arrival = build_segmented_fill_arrival(
             plan,
             options.brush_radius,
@@ -422,7 +456,6 @@ def render_video(
             options.direction,
             rng,
         )
-        progress(0.05)
     else:
         fill_arrival = build_fill_arrival(
             height,
@@ -432,6 +465,7 @@ def render_video(
             options.direction,
             rng,
         )
+    progress(0.05)
 
     temporary = output_path.with_suffix(".tmp.mp4")
     command = [
@@ -481,8 +515,8 @@ def render_video(
                     _smoothstep(0.0, detail_end, timeline)
                 )
                 detail_reveal = _smoothstep(
-                    -0.035,
-                    0.035,
+                    -detail_softness,
+                    detail_softness,
                     detail_progress - detail_arrival,
                 )
                 detail = (detail_alpha * detail_reveal)[..., None]

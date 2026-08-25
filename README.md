@@ -48,6 +48,8 @@ curl -X POST http://localhost:8000/v1/renders \
   -F 'detail_ratio=0.45' \
   -F 'detail_chroma=1.0' \
   -F 'detail_selectivity=0.5' \
+  -F 'detail_mode=regions' \
+  -F 'detail_feather=0.006' \
   -F 'brush_radius=0.12' \
   -F 'fill_brushes=3' \
   -F 'direction=reading-order' \
@@ -96,6 +98,8 @@ curl -X DELETE -H 'X-API-Key: dev-secret-change-me' \
 | `detail_ratio` | `0.45` | Punto de la línea de tiempo donde termina la fase de detalles |
 | `detail_chroma` | `1.0` | Color de la capa de detalle: `0` monocromo, `1` color original |
 | `detail_selectivity` | `0.5` | Fuerza mínima del detalle: valores altos conservan menos textura y contornos más definidos |
+| `detail_mode` | `regions` | `regions` entinta forma por forma; `legacy` conserva el barrido suave anterior |
+| `detail_feather` | `0.006` | Suavidad temporal del frente de entintado en modo `regions` |
 | `fill_overlap` | `0.08` | Superposición temporal entre detalles y relleno |
 | `final_hold` | `0.6` | Tiempo que permanece la imagen terminada |
 | `brush_radius` | `0.12` | Radio respecto al lado menor de la imagen |
@@ -114,7 +118,9 @@ Direcciones permitidas: `reading-order`, `right-to-left`, `left-to-right`, `top-
 
 `reading-order` comienza en la zona superior izquierda y combina avance de izquierda a derecha con descenso gradual. `random-origins` inicia la capa de detalles simultáneamente desde varios puntos determinados por `seed`.
 
-`detail_chroma` afecta únicamente la primera fase. El relleno y la imagen final siempre recuperan el color original. `detail_selectivity=0.5` conserva el comportamiento de la versión 0.3.0; valores próximos a `0.7` eliminan más manchas y textura débil. Para separar completamente las dos fases usa `fill_overlap=0`.
+`detail_chroma` afecta únicamente la primera fase. El relleno y la imagen final siempre recuperan el color original. `detail_selectivity=0.5` conserva la densidad de la versión 0.3.0; valores próximos a `0.7` eliminan más manchas y textura débil. Para separar completamente las dos fases usa `fill_overlap=0`.
+
+Con `detail_mode=regions`, la API reutiliza las máscaras y el orden de SAM 2 para entintar cada forma antes de continuar con la siguiente. La máscara se endurece para evitar la apariencia de humo y `detail_feather` controla únicamente la estrecha transición del frente en movimiento. Los detalles que no pertenecen a una región se pintan al final mediante el pincel global. Si `segmentation_mode=none`, el mismo modo utiliza el pincel global sobre toda la capa de detalle.
 
 Órdenes de región: `saliency`, `reading-order`, `center-first`, `large-first`, `small-first` y `random`. La segmentación no depende de categorías predefinidas: analiza cada imagen y produce máscaras nuevas. Las máscaras se limpian, se desduplican y se convierten en una partición sin solapamientos. Los píxeles no asignados forman una región residual que siempre se revela al final.
 

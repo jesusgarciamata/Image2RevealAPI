@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import numpy as np
 
-from app.models import Direction
+from app.models import DetailMode, Direction, RenderOptions
 from app.renderer import (
     build_continuous_brush_path,
     build_detail_arrival,
     build_detail_mask,
     build_detail_source,
     build_fill_arrival,
+    harden_detail_mask,
 )
 
 
@@ -53,6 +54,23 @@ def test_detail_chroma_controls_only_color() -> None:
     assert np.abs(muted[..., 0] - muted[..., 2]).mean() < np.abs(
         original[..., 0] - original[..., 2]
     ).mean()
+
+
+def test_region_detail_mode_is_the_new_default() -> None:
+    options = RenderOptions()
+    assert options.detail_mode == DetailMode.regions
+    assert options.detail_feather == 0.006
+
+
+def test_harden_detail_mask_suppresses_haze_and_keeps_ink() -> None:
+    mask = np.array([[0.0, 0.10, 0.30, 0.60, 0.90, 1.0]], dtype=np.float32)
+    hardened = harden_detail_mask(mask)
+
+    assert hardened.dtype == np.float32
+    assert hardened[0, 1] < mask[0, 1]
+    assert hardened[0, 4] > mask[0, 4]
+    assert hardened[0, 0] == 0.0
+    assert hardened[0, -1] == 1.0
 
 
 def test_arrival_maps_cover_full_image() -> None:

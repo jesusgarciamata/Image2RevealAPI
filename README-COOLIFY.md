@@ -88,15 +88,15 @@ Debe devolver algo similar a:
 
 Después abre `/docs` para ejecutar el primer render desde Swagger UI.
 
-## Actualizar a 0.3.1
+## Actualizar a 0.4.0
 
-1. Actualiza el código del repositorio a la versión 0.3.1 y realiza `push`.
+1. Actualiza el código del repositorio a la versión 0.4.0 y realiza `push`.
 2. En Coolify pulsa **Redeploy** si el webhook no lo hace automáticamente.
 3. No borres el volumen `reveal-data`; no requiere migración.
-4. Confirma que `/docs` muestre `segmentation_mode`, `region_order`, `max_regions` y `min_region_area`.
+4. Confirma que `/docs` muestre `detail_mode`, `detail_feather`, `segmentation_mode`, `region_order`, `max_regions` y `min_region_area`.
 
 La primera compilación será considerablemente mayor que en 0.2 porque descarga PyTorch CPU, el código de SAM 2 fijado a una revisión concreta y un checkpoint verificado de aproximadamente 156 MB. El servidor de build necesita acceso saliente a `download.pytorch.org`, `github.com` y `huggingface.co`.
 
 El primer render después de iniciar el contenedor carga el modelo y puede tardar más. Las siguientes solicitudes reutilizan la misma instancia.
 
-Los clientes que necesiten el comportamiento anterior pueden enviar `segmentation_mode=none`. No hay migración del volumen ni cambio en los endpoints existentes.
+Los clientes que necesiten el barrido de detalle anterior pueden enviar `detail_mode=legacy`. `segmentation_mode=none` mantiene el pincel global sin SAM 2. No hay migración del volumen ni cambio en los endpoints existentes.

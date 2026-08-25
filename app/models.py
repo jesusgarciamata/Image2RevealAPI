@@ -34,6 +34,11 @@ class SegmentationMode(str, Enum):
     none = "none"
 
 
+class DetailMode(str, Enum):
+    regions = "regions"
+    legacy = "legacy"
+
+
 class RegionOrder(str, Enum):
     saliency = "saliency"
     reading_order = "reading-order"
@@ -58,6 +63,13 @@ class RenderOptions(BaseModel):
         ge=0.0,
         le=1.0,
         description="Selectividad de contornos: valores altos descartan textura débil",
+    )
+    detail_mode: DetailMode = DetailMode.regions
+    detail_feather: float = Field(
+        default=0.006,
+        ge=0.001,
+        le=0.05,
+        description="Suavidad temporal del frente que pinta la capa de detalle",
     )
     fill_overlap: float = Field(default=0.08, ge=0.0, le=0.25)
     final_hold: float = Field(default=0.6, ge=0.0, le=5.0)

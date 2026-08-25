@@ -16,6 +16,7 @@ from .config import Settings
 from .jobs import JobManager, QueueFullError
 from .models import (
     CreateJobResponse,
+    DetailMode,
     Direction,
     HealthResponse,
     JobRecord,
@@ -45,8 +46,8 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Organic Reveal API",
-    version="0.3.1",
-    description="Convierte una imagen en un video de revelado progresivo por detalles coloreados y pincel orgánico.",
+    version="0.4.0",
+    description="Convierte una imagen en un video que entinta y colorea progresivamente sus regiones visuales.",
     lifespan=lifespan,
 )
 
@@ -72,6 +73,14 @@ def _parse_segmentation_mode(value: str) -> SegmentationMode:
     except ValueError as exc:
         allowed = ", ".join(item.value for item in SegmentationMode)
         raise HTTPException(status_code=422, detail=f"segmentation_mode debe ser: {allowed}") from exc
+
+
+def _parse_detail_mode(value: str) -> DetailMode:
+    try:
+        return DetailMode(value)
+    except ValueError as exc:
+        allowed = ", ".join(item.value for item in DetailMode)
+        raise HTTPException(status_code=422, detail=f"detail_mode debe ser: {allowed}") from exc
 
 
 def _parse_region_order(value: str) -> RegionOrder:
@@ -143,6 +152,16 @@ async def create_render(
         le=1.0,
         description="Selectividad de contornos: valores altos descartan textura débil",
     ),
+    detail_mode: str = Form(
+        "regions",
+        description="regions pinta el detalle forma por forma; legacy conserva el barrido anterior",
+    ),
+    detail_feather: float = Form(
+        0.006,
+        ge=0.001,
+        le=0.05,
+        description="Suavidad temporal del frente que pinta la capa de detalle",
+    ),
     fill_overlap: float = Form(0.08, ge=0.0, le=0.25),
     final_hold: float = Form(0.6, ge=0.0, le=5.0),
     brush_radius: float = Form(0.12, ge=0.03, le=0.30),
@@ -166,6 +185,8 @@ async def create_render(
         detail_ratio=detail_ratio,
         detail_chroma=detail_chroma,
         detail_selectivity=detail_selectivity,
+        detail_mode=_parse_detail_mode(detail_mode),
+        detail_feather=detail_feather,
         fill_overlap=fill_overlap,
         final_hold=final_hold,
         brush_radius=brush_radius,

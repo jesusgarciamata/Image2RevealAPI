@@ -1,5 +1,13 @@
 # Historial de cambios
 
+## 0.4.0
+
+- Nuevo modo predeterminado `detail_mode=regions`: entinta progresivamente cada forma detectada por SAM 2 antes de pasar a la siguiente.
+- La primera fase reutiliza `region_order` y las máscaras de la fase de color, pero genera un movimiento independiente para evitar repetir exactamente el mismo recorrido.
+- Nuevo parámetro `detail_feather`, con una transición corta que elimina el aspecto de humo sin perder antialiasing.
+- La máscara de detalle se endurece solo en modo `regions`; `detail_mode=legacy` conserva la animación anterior.
+- La fase de color mantiene su algoritmo, sus parámetros y la secuencia pseudoaleatoria de la versión 0.3.1.
+
 ## 0.3.1
 
 - Nuevo parámetro `detail_chroma` para desaturar únicamente la capa de detalle sin alterar el relleno ni la imagen final.
