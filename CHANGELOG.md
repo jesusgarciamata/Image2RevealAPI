@@ -1,5 +1,12 @@
 # Historial de cambios
 
+## 0.4.1
+
+- El residual no identificado por SAM 2 abandona la trayectoria serpenteante y visita aleatoriamente zonas pendientes cercanas.
+- Las transiciones entre destinos se interpolan densamente para que el movimiento permanezca continuo incluso cuando cambia de dirección.
+- Los sellos residuales se solapan con un retardo radial mínimo, eliminando la apariencia de discos o chunks sucesivos.
+- El recorrido continúa siendo completamente reproducible mediante `seed`.
+
 ## 0.4.0
 
 - Nuevo modo predeterminado `detail_mode=regions`: entinta progresivamente cada forma detectada por SAM 2 antes de pasar a la siguiente.

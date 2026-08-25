@@ -122,6 +122,8 @@ Direcciones permitidas: `reading-order`, `right-to-left`, `left-to-right`, `top-
 
 Con `detail_mode=regions`, la API reutiliza las máscaras y el orden de SAM 2 para entintar cada forma antes de continuar con la siguiente. La máscara se endurece para evitar la apariencia de humo y `detail_feather` controla únicamente la estrecha transición del frente en movimiento. Los detalles que no pertenecen a una región se pintan al final mediante el pincel global. Si `segmentation_mode=none`, el mismo modo utiliza el pincel global sobre toda la capa de detalle.
 
+El residual que SAM 2 no asigna a ninguna forma utiliza un recorrido aleatorio local: busca zonas cercanas todavía pendientes, cambia de dirección sin seguir un patrón serpenteante y conecta cada destino con sellos ampliamente solapados. El movimiento sigue siendo reproducible mediante `seed` y no depende de `direction`.
+
 Órdenes de región: `saliency`, `reading-order`, `center-first`, `large-first`, `small-first` y `random`. La segmentación no depende de categorías predefinidas: analiza cada imagen y produce máscaras nuevas. Las máscaras se limpian, se desduplican y se convierten en una partición sin solapamientos. Los píxeles no asignados forman una región residual que siempre se revela al final.
 
 ## Segmentación automática

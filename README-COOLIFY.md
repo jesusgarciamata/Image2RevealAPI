@@ -88,9 +88,9 @@ Debe devolver algo similar a:
 
 Después abre `/docs` para ejecutar el primer render desde Swagger UI.
 
-## Actualizar a 0.4.0
+## Actualizar a 0.4.1
 
-1. Actualiza el código del repositorio a la versión 0.4.0 y realiza `push`.
+1. Actualiza el código del repositorio a la versión 0.4.1 y realiza `push`.
 2. En Coolify pulsa **Redeploy** si el webhook no lo hace automáticamente.
 3. No borres el volumen `reveal-data`; no requiere migración.
 4. Confirma que `/docs` muestre `detail_mode`, `detail_feather`, `segmentation_mode`, `region_order`, `max_regions` y `min_region_area`.

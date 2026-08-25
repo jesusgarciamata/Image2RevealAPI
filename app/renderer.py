@@ -284,6 +284,153 @@ def build_fill_arrival(
     return arrival
 
 
+def build_random_residual_brush_path(
+    residual: np.ndarray,
+    radius: float,
+    rng: np.random.Generator,
+) -> list[tuple[float, float]]:
+    """Visit residual cells in locally random directions with dense transitions."""
+    height, width = residual.shape
+    cell_size = max(2, round(radius * 0.55))
+    rows = math.ceil(height / cell_size)
+    columns = math.ceil(width / cell_size)
+    active = np.zeros((rows, columns), dtype=bool)
+    targets = np.zeros((rows, columns, 2), dtype=np.float32)
+
+    for row in range(rows):
+        y0 = row * cell_size
+        y1 = min(height, y0 + cell_size)
+        for column in range(columns):
+            x0 = column * cell_size
+            x1 = min(width, x0 + cell_size)
+            positions = np.flatnonzero(residual[y0:y1, x0:x1])
+            if not len(positions):
+                continue
+            chosen = int(positions[int(rng.integers(0, len(positions)))])
+            local_width = x1 - x0
+            targets[row, column] = (
+                x0 + chosen % local_width,
+                y0 + chosen // local_width,
+            )
+            active[row, column] = True
+
+    remaining = int(np.count_nonzero(active))
+    if not remaining:
+        return []
+
+    start_candidates = np.argwhere(active)
+    start_row, start_column = start_candidates[int(rng.integers(0, len(start_candidates)))]
+    current_row = int(start_row)
+    current_column = int(start_column)
+    ordered: list[tuple[float, float]] = []
+
+    while remaining:
+        if active[current_row, current_column]:
+            active[current_row, current_column] = False
+            remaining -= 1
+            target = targets[current_row, current_column]
+            ordered.append((float(target[0]), float(target[1])))
+        if not remaining:
+            break
+
+        candidates: list[tuple[int, int]] = []
+        for search_radius in range(1, 4):
+            row0 = max(0, current_row - search_radius)
+            row1 = min(rows, current_row + search_radius + 1)
+            column0 = max(0, current_column - search_radius)
+            column1 = min(columns, current_column + search_radius + 1)
+            local = np.argwhere(active[row0:row1, column0:column1])
+            if len(local):
+                candidates = [
+                    (int(row0 + item[0]), int(column0 + item[1]))
+                    for item in local
+                ]
+                break
+        if not candidates:
+            global_candidates = np.argwhere(active)
+            chosen = global_candidates[int(rng.integers(0, len(global_candidates)))]
+            current_row, current_column = int(chosen[0]), int(chosen[1])
+            continue
+
+        distances = np.array(
+            [
+                math.hypot(row - current_row, column - current_column)
+                for row, column in candidates
+            ],
+            dtype=np.float32,
+        )
+        weights = 1.0 / np.maximum(distances, 0.5)
+        weights /= float(weights.sum())
+        selected = int(rng.choice(len(candidates), p=weights))
+        current_row, current_column = candidates[selected]
+
+    dense: list[tuple[float, float]] = [ordered[0]]
+    step = max(1.0, radius * 0.08)
+    for target in ordered[1:]:
+        segment = _sample_line(dense[-1], target, step)
+        dense.extend(segment[1:])
+        dense.append(target)
+    return dense
+
+
+def build_random_residual_arrival(
+    residual: np.ndarray,
+    radius_ratio: float,
+    brush_count: int,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Paint only unassigned pixels using dense, randomized local motion."""
+    height, width = residual.shape
+    radius = max(8.0, min(height, width) * radius_ratio)
+    points = build_random_residual_brush_path(residual, radius, rng)
+    arrival = np.full((height, width), np.inf, dtype=np.float32)
+    if not points:
+        return np.ones((height, width), dtype=np.float32)
+
+    boundaries = np.linspace(0, len(points), brush_count + 1, dtype=int)
+    for brush_index in range(brush_count):
+        start = int(boundaries[brush_index])
+        end = int(boundaries[brush_index + 1])
+        brush_points = points[start:end]
+        local_count = max(len(brush_points) - 1, 1)
+        brush_phase = float(rng.uniform(0.0, math.tau))
+        for local_index, (cx, cy) in enumerate(brush_points):
+            scale = 1.0 + 0.035 * math.sin(local_index * 0.07 + brush_phase)
+            _stamp_arrival(
+                arrival,
+                cx,
+                cy,
+                radius * scale,
+                local_index / local_count,
+                radius_ratio,
+                radial_delay=0.004,
+            )
+
+    finite = np.isfinite(arrival)
+    finite_residual = finite & residual
+    if np.any(finite_residual):
+        lower = float(arrival[finite_residual].min())
+        upper = float(arrival[finite_residual].max())
+        arrival[finite] = np.clip(
+            (arrival[finite] - lower) / max(upper - lower, 1e-6),
+            0.0,
+            1.0,
+        )
+    arrival[~finite] = 1.0
+    arrival = cv2.GaussianBlur(
+        arrival,
+        (0, 0),
+        sigmaX=max(1.0, radius * 0.45),
+        sigmaY=max(1.0, radius * 0.45),
+    )
+    residual_values = arrival[residual]
+    arrival[residual] = (residual_values - float(residual_values.min())) / max(
+        float(residual_values.max() - residual_values.min()), 1e-6
+    )
+    arrival[~residual] = 1.0
+    return arrival
+
+
 def _region_local_arrival(
     mask: np.ndarray,
     rng: np.random.Generator,
@@ -348,12 +495,10 @@ def build_segmented_fill_arrival(
         cursor += span
 
     if residual_area:
-        residual_local = build_fill_arrival(
-            height,
-            width,
+        residual_local = build_random_residual_arrival(
+            plan.residual,
             radius_ratio,
             brush_count,
-            direction,
             rng,
         )
         residual_span = max(1.0 - cursor, 1e-6)
@@ -371,6 +516,7 @@ def _stamp_arrival(
     point_radius: float,
     stamp_time: float,
     radius_ratio: float,
+    radial_delay: float | None = None,
 ) -> None:
     height, width = arrival.shape
     x0 = max(0, int(cx - point_radius))
@@ -382,7 +528,9 @@ def _stamp_arrival(
     yy, xx = np.mgrid[y0:y1, x0:x1]
     distance = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) / point_radius
     inside = distance <= 1.0
-    candidate = stamp_time + distance.astype(np.float32) * (0.018 / max(radius_ratio, 0.03))
+    if radial_delay is None:
+        radial_delay = 0.018 / max(radius_ratio, 0.03)
+    candidate = stamp_time + distance.astype(np.float32) * radial_delay
     region = arrival[y0:y1, x0:x1]
     np.minimum(region, np.where(inside, candidate, np.inf), out=region)
 

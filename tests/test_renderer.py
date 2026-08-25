@@ -9,6 +9,8 @@ from app.renderer import (
     build_detail_mask,
     build_detail_source,
     build_fill_arrival,
+    build_random_residual_arrival,
+    build_random_residual_brush_path,
     harden_detail_mask,
 )
 
@@ -106,3 +108,43 @@ def test_fill_uses_dense_continuous_paths() -> None:
         ]
         assert len(path) > 100
         assert max(steps) < radius * 0.45, direction
+
+
+def test_residual_path_is_dense_random_and_reproducible() -> None:
+    residual = np.ones((120, 200), dtype=bool)
+    residual[35:85, 70:130] = False
+    radius = 18.0
+    first = build_random_residual_brush_path(
+        residual, radius, np.random.default_rng(42)
+    )
+    second = build_random_residual_brush_path(
+        residual, radius, np.random.default_rng(42)
+    )
+
+    np.testing.assert_array_equal(first, second)
+    steps = np.diff(np.asarray(first), axis=0)
+    distances = np.linalg.norm(steps, axis=1)
+    assert float(distances.max()) <= max(1.0, radius * 0.08) * 1.05
+    assert np.any(steps[:, 0] > 0) and np.any(steps[:, 0] < 0)
+    assert np.any(steps[:, 1] > 0) and np.any(steps[:, 1] < 0)
+
+
+def test_random_residual_arrival_covers_only_residual() -> None:
+    residual = np.zeros((90, 150), dtype=bool)
+    residual[5:42, 8:140] = True
+    residual[55:85, 25:120] = True
+    arrival = build_random_residual_arrival(
+        residual,
+        radius_ratio=0.08,
+        brush_count=2,
+        rng=np.random.default_rng(7),
+    )
+
+    assert np.isfinite(arrival).all()
+    assert 0.0 <= float(arrival[residual].min())
+    assert float(arrival[residual].max()) <= 1.0
+    assert np.all(arrival[~residual] == 1.0)
+    horizontal = np.abs(np.diff(arrival, axis=1))[residual[:, :-1] & residual[:, 1:]]
+    vertical = np.abs(np.diff(arrival, axis=0))[residual[:-1] & residual[1:]]
+    neighbor_deltas = np.concatenate((horizontal, vertical))
+    assert float(np.percentile(neighbor_deltas, 99)) < 0.08
