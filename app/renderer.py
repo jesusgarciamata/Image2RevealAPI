@@ -288,6 +288,7 @@ def build_random_residual_brush_path(
     residual: np.ndarray,
     radius: float,
     rng: np.random.Generator,
+    start_hint: tuple[float, float] | None = None,
 ) -> list[tuple[float, float]]:
     """Visit residual cells in locally random directions with dense transitions."""
     height, width = residual.shape
@@ -319,7 +320,19 @@ def build_random_residual_brush_path(
         return []
 
     start_candidates = np.argwhere(active)
-    start_row, start_column = start_candidates[int(rng.integers(0, len(start_candidates)))]
+    if start_hint is None:
+        start_row, start_column = start_candidates[
+            int(rng.integers(0, len(start_candidates)))
+        ]
+    else:
+        candidate_targets = targets[
+            start_candidates[:, 0], start_candidates[:, 1]
+        ]
+        distances = np.sum(
+            (candidate_targets - np.asarray(start_hint, dtype=np.float32)) ** 2,
+            axis=1,
+        )
+        start_row, start_column = start_candidates[int(np.argmin(distances))]
     current_row = int(start_row)
     current_column = int(start_column)
     ordered: list[tuple[float, float]] = []
@@ -348,7 +361,15 @@ def build_random_residual_brush_path(
                 break
         if not candidates:
             global_candidates = np.argwhere(active)
-            chosen = global_candidates[int(rng.integers(0, len(global_candidates)))]
+            candidate_targets = targets[
+                global_candidates[:, 0], global_candidates[:, 1]
+            ]
+            current_target = targets[current_row, current_column]
+            distances = np.sum(
+                (candidate_targets - current_target) ** 2,
+                axis=1,
+            )
+            chosen = global_candidates[int(np.argmin(distances))]
             current_row, current_column = int(chosen[0]), int(chosen[1])
             continue
 
@@ -373,6 +394,48 @@ def build_random_residual_brush_path(
     return dense
 
 
+def _build_single_mask_brush_arrival(
+    mask: np.ndarray,
+    radius_ratio: float,
+    rng: np.random.Generator,
+    start_hint: tuple[float, float] | None = None,
+) -> tuple[np.ndarray, tuple[float, float] | None]:
+    """Paint one mask with one solid brush head and return its final position."""
+    height, width = mask.shape
+    radius = max(8.0, min(height, width) * radius_ratio)
+    points = build_random_residual_brush_path(mask, radius, rng, start_hint)
+    arrival = np.full((height, width), np.inf, dtype=np.float32)
+    if not points:
+        return np.ones((height, width), dtype=np.float32), start_hint
+
+    local_count = max(len(points) - 1, 1)
+    brush_phase = float(rng.uniform(0.0, math.tau))
+    for local_index, (cx, cy) in enumerate(points):
+        scale = 1.0 + 0.035 * math.sin(local_index * 0.07 + brush_phase)
+        _stamp_arrival(
+            arrival,
+            cx,
+            cy,
+            radius * scale,
+            local_index / local_count,
+            radius_ratio,
+            radial_delay=0.0,
+        )
+
+    finite_mask = np.isfinite(arrival) & mask
+    if np.any(finite_mask):
+        lower = float(arrival[finite_mask].min())
+        upper = float(arrival[finite_mask].max())
+        arrival[finite_mask] = np.clip(
+            (arrival[finite_mask] - lower) / max(upper - lower, 1e-6),
+            0.0,
+            1.0,
+        )
+    arrival[mask & ~finite_mask] = 1.0
+    arrival[~mask] = 1.0
+    return arrival, points[-1]
+
+
 def build_random_residual_arrival(
     residual: np.ndarray,
     radius_ratio: float,
@@ -382,6 +445,14 @@ def build_random_residual_arrival(
     """Paint only unassigned pixels using dense, randomized local motion."""
     height, width = residual.shape
     radius = max(8.0, min(height, width) * radius_ratio)
+    if brush_count == 1:
+        arrival, _ = _build_single_mask_brush_arrival(
+            residual,
+            radius_ratio,
+            rng,
+        )
+        return arrival
+
     points = build_random_residual_brush_path(residual, radius, rng)
     arrival = np.full((height, width), np.inf, dtype=np.float32)
     if not points:
@@ -476,6 +547,30 @@ def build_segmented_fill_arrival(
     residual_weight = max(0.9, min(1.8, math.sqrt(residual_area / max(height * width, 1)) * 2.0))
     total_weight = sum(weights) + residual_weight
     cursor = 0.0
+
+    if brush_count == 1:
+        previous_endpoint: tuple[float, float] | None = None
+        targets = [
+            (region.mask, weight)
+            for region, weight in zip(plan.regions, weights)
+        ]
+        if residual_area:
+            targets.append((plan.residual, residual_weight))
+
+        for mask, weight in targets:
+            span = weight / max(total_weight, 1e-6)
+            local, previous_endpoint = _build_single_mask_brush_arrival(
+                mask,
+                radius_ratio,
+                rng,
+                start_hint=previous_endpoint,
+            )
+            arrival[mask] = cursor + local[mask] * span
+            cursor += span
+
+        arrival -= float(arrival.min())
+        arrival /= max(float(arrival.max()), 1e-6)
+        return arrival
 
     for region, weight in zip(plan.regions, weights):
         span = weight / max(total_weight, 1e-6)

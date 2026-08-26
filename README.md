@@ -104,7 +104,7 @@ curl -X DELETE -H 'X-API-Key: dev-secret-change-me' \
 | `final_hold` | `0.6` | Tiempo que permanece la imagen terminada |
 | `brush_radius` | `0.12` | Radio respecto al lado menor de la imagen |
 | `brush_feather` | `0.16` | Suavidad temporal del borde del pincel |
-| `fill_brushes` | `3` | Pinceles continuos que se desplazan simultáneamente |
+| `fill_brushes` | `3` | `1` usa un solo cabezal secuencial en regiones SAM 2 y residual; valores mayores permiten varios pinceles residuales |
 | `direction` | `reading-order` | Dirección general del revelado |
 | `segmentation_mode` | `auto` | `auto` segmenta por regiones; `none` usa el pincel global 0.2 |
 | `region_order` | `saliency` | Estrategia para ordenar las regiones detectadas |

@@ -1,5 +1,12 @@
 # Historial de cambios
 
+## 0.4.2
+
+- `fill_brushes=1` ahora utiliza un único cabezal sólido también dentro de cada región SAM 2, no solo en el residual.
+- Las regiones y el residual se recorren secuencialmente con intervalos temporales no superpuestos.
+- El inicio de cada forma se elige cerca del punto donde terminó la anterior y los saltos residuales buscan el destino pendiente más cercano.
+- `fill_overlap=0` permite observar una sola fase y un solo frente activo en cada momento.
+
 ## 0.4.1
 
 - El residual no identificado por SAM 2 abandona la trayectoria serpenteante y visita aleatoriamente zonas pendientes cercanas.

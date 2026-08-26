@@ -88,9 +88,9 @@ Debe devolver algo similar a:
 
 Después abre `/docs` para ejecutar el primer render desde Swagger UI.
 
-## Actualizar a 0.4.1
+## Actualizar a 0.4.2
 
-1. Actualiza el código del repositorio a la versión 0.4.1 y realiza `push`.
+1. Actualiza el código del repositorio a la versión 0.4.2 y realiza `push`.
 2. En Coolify pulsa **Redeploy** si el webhook no lo hace automáticamente.
 3. No borres el volumen `reveal-data`; no requiere migración.
 4. Confirma que `/docs` muestre `detail_mode`, `detail_feather`, `segmentation_mode`, `region_order`, `max_regions` y `min_region_area`.
@@ -100,3 +100,5 @@ La primera compilación será considerablemente mayor que en 0.2 porque descarga
 El primer render después de iniciar el contenedor carga el modelo y puede tardar más. Las siguientes solicitudes reutilizan la misma instancia.
 
 Los clientes que necesiten el barrido de detalle anterior pueden enviar `detail_mode=legacy`. `segmentation_mode=none` mantiene el pincel global sin SAM 2. No hay migración del volumen ni cambio en los endpoints existentes.
+
+Para obtener un solo frente visible, usa `fill_brushes=1` y `fill_overlap=0`. En 0.4.2 ese único cabezal pinta secuencialmente cada región SAM 2 y finalmente el residual.

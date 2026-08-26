@@ -46,7 +46,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Organic Reveal API",
-    version="0.4.1",
+    version="0.4.2",
     description="Convierte una imagen en un video que entinta y colorea progresivamente sus regiones visuales.",
     lifespan=lifespan,
 )

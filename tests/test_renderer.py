@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 
 from app.models import DetailMode, Direction, RenderOptions
+from app.segmentation import Region, RegionPlan
 from app.renderer import (
     build_continuous_brush_path,
     build_detail_arrival,
@@ -11,6 +12,7 @@ from app.renderer import (
     build_fill_arrival,
     build_random_residual_arrival,
     build_random_residual_brush_path,
+    build_segmented_fill_arrival,
     harden_detail_mask,
 )
 
@@ -167,3 +169,41 @@ def test_random_residual_arrival_starts_as_one_solid_brush_stamp() -> None:
     sample_y = int(np.clip(round(start_y), 0, residual.shape[0] - 1))
     assert arrival[round(start_y), round(start_x)] == 0.0
     assert arrival[sample_y, sample_x] == 0.0
+
+
+def test_one_segmented_brush_paints_regions_and_residual_sequentially() -> None:
+    shape = (100, 180)
+    first_mask = np.zeros(shape, dtype=bool)
+    first_mask[8:42, 8:68] = True
+    second_mask = np.zeros(shape, dtype=bool)
+    second_mask[15:70, 105:170] = True
+    residual = ~(first_mask | second_mask)
+
+    def region(mask: np.ndarray) -> Region:
+        ys, xs = np.nonzero(mask)
+        return Region(
+            mask=mask,
+            area=int(np.count_nonzero(mask)),
+            bbox=(int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1),
+            centroid=(float(xs.mean()), float(ys.mean())),
+            mean_lab=np.zeros(3, dtype=np.float32),
+            quality=1.0,
+        )
+
+    plan = RegionPlan(
+        regions=[region(first_mask), region(second_mask)],
+        residual=residual,
+        analysis_width=shape[1],
+        analysis_height=shape[0],
+    )
+    arrival = build_segmented_fill_arrival(
+        plan,
+        radius_ratio=0.08,
+        brush_count=1,
+        direction=Direction.organic,
+        rng=np.random.default_rng(31),
+    )
+
+    assert float(arrival[first_mask].max()) <= float(arrival[second_mask].min())
+    assert float(arrival[second_mask].max()) <= float(arrival[residual].min())
+    assert np.count_nonzero(arrival[first_mask] == arrival[first_mask].min()) > 1
